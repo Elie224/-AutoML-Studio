@@ -47,10 +47,11 @@ class EDAResult:
     anomaly_summary: dict[str, Any]
     figures: list[str] = field(default_factory=list)
     insights: list[str] = field(default_factory=list)
+    quality_score: dict[str, Any] = field(default_factory=dict)
+    id_columns: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
 
 @dataclass
 class PreprocessingPlan:
@@ -111,6 +112,7 @@ class PipelineResult:
     best_model: ModelResult
     explainability: ExplainabilityResult | None
     artifacts: dict[str, str]
+    target_suggestions: list[dict[str, Any]] = field(default_factory=list)
     report_paths: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,5 +125,10 @@ class PipelineResult:
             "best_model": self.best_model.to_dict(),
             "explainability": self.explainability.to_dict() if self.explainability else None,
             "artifacts": self.artifacts,
+            "target_suggestions": self.target_suggestions,
             "report_paths": self.report_paths,
         }
+
+
+
+

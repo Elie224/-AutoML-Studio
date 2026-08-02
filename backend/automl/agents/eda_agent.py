@@ -17,6 +17,7 @@ import seaborn as sns
 
 from ..core.config import get_settings
 from ..core.schema import EDAResult
+from .id_detector import detect_id_columns
 
 
 def _jsonable(value):
@@ -52,28 +53,34 @@ class EDAAgent:
     # Public API
     # ------------------------------------------------------------------
     def run(self, df: pd.DataFrame, target: str | None = None) -> EDAResult:
+        id_columns = detect_id_columns(df)
+        id_names = {c.name for c in id_columns}
+        df_analysis = df.drop(columns=[c for c in id_names if c in df.columns], errors="ignore")
+
         result = EDAResult(
-            summary=self._summary(df, target),
-            descriptive_stats=self._descriptive(df),
+            summary=self._summary(df, target, id_columns),
+            descriptive_stats=self._descriptive(df_analysis),
             missing_values=self._missing(df),
             duplicates=int(df.duplicated().sum()),
-            correlations=self._correlations(df),
-            outliers=self._outliers(df),
+            correlations=self._correlations(df_analysis),
+            outliers=self._outliers(df_analysis),
             class_balance=self._class_balance(df, target),
-            categorical_summary=self._categorical(df),
+            categorical_summary=self._categorical(df_analysis),
             temporal_summary=self._temporal(df),
-            anomaly_summary=self._anomalies(df),
+            anomaly_summary=self._anomalies(df_analysis),
             figures=[],
             insights=[],
+            id_columns=[{"name": c.name, "reason": c.reason} for c in id_columns],
         )
-        result.figures = self._figures(df, target)
-        result.insights = self._insights(result)
+        result.quality_score = self._quality_score(df, id_columns, result)
+        result.figures = self._figures(df, df_analysis, target, id_columns)
+        result.insights = self._insights(result, df, id_columns)
         return result
 
     # ------------------------------------------------------------------
     # Core computations
     # ------------------------------------------------------------------
-    def _summary(self, df: pd.DataFrame, target: str | None) -> dict:
+    def _summary(self, df: pd.DataFrame, target: str | None, id_columns=None) -> dict:
         return {
             "shape": [int(df.shape[0]), int(df.shape[1])],
             "memory_mb": round(df.memory_usage(deep=True).sum() / (1024 * 1024), 3),
@@ -82,6 +89,7 @@ class EDAAgent:
             "n_numeric": int(df.select_dtypes(include="number").shape[1]),
             "n_categorical": int(df.select_dtypes(include=["object", "category"]).shape[1]),
             "n_datetime": int(sum(pd.api.types.is_datetime64_any_dtype(df[c]) for c in df.columns)),
+            "id_columns": [{"name": c.name, "reason": c.reason} for c in (id_columns or [])],
         }
 
     def _descriptive(self, df: pd.DataFrame) -> dict:
@@ -216,7 +224,7 @@ class EDAAgent:
     # ------------------------------------------------------------------
     # Figures and insights
     # ------------------------------------------------------------------
-    def _figures(self, df: pd.DataFrame, target: str | None) -> list[str]:
+    def _figures(self, df: pd.DataFrame, df_analysis: pd.DataFrame, target: str | None, id_columns) -> list[str]:
         figures: list[str] = []
         sns.set_theme(style="whitegrid")
 
@@ -268,11 +276,12 @@ class EDAAgent:
             fig.tight_layout()
             figures.append(self._save(fig, "target_distribution.png"))
 
-        # Outliers boxplot
-        if not numeric.empty:
-            cols = numeric.columns[:10]
+        # Outliers boxplot (uses df_analysis to exclude ID columns)
+        if not df_analysis.empty:
+            numeric_clean = df_analysis.select_dtypes(include='number')
+            cols = numeric_clean.columns[:10]
             fig, ax = plt.subplots(figsize=(max(8, 1.0 * len(cols)), 4))
-            numeric[cols].boxplot(ax=ax)
+            numeric_clean[cols].boxplot(ax=ax)
             ax.set_title("Boxplots (détection d'outliers)")
             fig.tight_layout()
             figures.append(self._save(fig, "boxplots.png"))
@@ -285,22 +294,67 @@ class EDAAgent:
         plt.close(fig)
         return str(path.relative_to(self.settings.artifacts_root))
 
-    def _insights(self, result: EDAResult) -> list[str]:
-        insights: list[str] = []
+    def _quality_score(self, df, id_columns, eda):
+        n_rows = max(len(df), 1)
+        score = 100
+        issues = []
+        for col, info in eda.missing_values["missing_per_column"].items():
+            ratio = info["ratio"]
+            if ratio > 0.50:
+                score -= 12
+                issues.append(f"{col} : {ratio*100:.1f}% de valeurs manquantes.")
+            elif ratio > 0.20:
+                score -= 5
+            elif ratio > 0.05:
+                score -= 2
+        dup_ratio = eda.duplicates / n_rows if n_rows else 0
+        if dup_ratio > 0.10:
+            score -= 10
+            issues.append(f"{eda.duplicates} doublons ({dup_ratio*100:.1f}%).")
+        elif dup_ratio > 0.01:
+            score -= 3
+        if id_columns:
+            score -= min(5, len(id_columns) * 2)
+            issues.append(f"{len(id_columns)} colonne(s) identifiant détectée(s).")
+        score -= min(15, len(eda.outliers) * 3 if eda.outliers else 0)
+        if eda.class_balance and eda.class_balance.get("is_imbalanced"):
+            score -= 5
+            issues.append("Cible déséquilibrée.")
+        score = max(0, min(100, score))
+        if score >= 85:
+            grade = "excellent"
+        elif score >= 70:
+            grade = "bon"
+        elif score >= 50:
+            grade = "moyen"
+        else:
+            grade = "faible"
+        return {"score": score, "grade": grade, "issues": issues}
+
+    def _insights(self, result, df, id_columns):
+        insights = []
+        if id_columns:
+            names = ', '.join(c.name for c in id_columns)
+            insights.append(f"Colonnes identifiants détectées : {names} (exclues des analyses).")
         if result.missing_values["total_missing"] > 0:
             top = sorted(result.missing_values["missing_per_column"].items(), key=lambda x: x[1]["count"], reverse=True)[:3]
             cols = ", ".join(f"{c} ({v['ratio']*100:.1f}%)" for c, v in top)
-            insights.append(f"Valeurs manquantes détectées sur: {cols}.")
+            insights.append(f"Valeurs manquantes : {cols}.")
         if result.duplicates > 0:
-            insights.append(f"{result.duplicates} doublons exacts identifiés dans le jeu de données.")
+            insights.append(f"{result.duplicates} doublons exacts identifiés.")
         if result.class_balance and result.class_balance.get("is_imbalanced"):
-            insights.append("La cible est déséquilibrée : envisagez SMOTE, class_weight ou stratified sampling.")
+            insights.append("Cible déséquilibrée : SMOTE, class_weight ou stratified sampling conseillés.")
         if result.outliers:
             top_out = sorted(result.outliers.items(), key=lambda x: x[1]["count"], reverse=True)[:3]
-            cols = ", ".join(c for c, _ in top_out)
-            insights.append(f"Outliers détectés (méthode IQR) sur: {cols}.")
+            cols = ', '.join(c for c, _ in top_out)
+            insights.append(f"Outliers (méthode IQR) sur : {cols}.")
         if result.anomaly_summary.get("available") and result.anomaly_summary.get("ratio", 0) > 0.1:
             insights.append(f"{result.anomaly_summary['n_anomalies']} anomalies potentielles (Isolation Forest).")
         if not insights:
-            insights.append("Le jeu de données semble propre : aucune anomalie majeure détectée.")
+            insights.append("Le jeu de données semble propre.")
         return insights
+
+
+
+
+

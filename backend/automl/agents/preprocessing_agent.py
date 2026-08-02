@@ -27,6 +27,7 @@ from sklearn.preprocessing import (
     TargetEncoder,
 )
 
+from ..agents.id_detector import detect_id_columns
 from ..core.schema import PreprocessingPlan
 
 
@@ -58,6 +59,13 @@ class PreprocessingAgent:
     def suggest_plan(self, df: pd.DataFrame, target: str | None) -> PreprocessingPlan:
         plan = PreprocessingPlan()
         n_rows = max(len(df), 1)
+
+        # Drop identifier-like columns first so they never reach the models.
+        for id_col in detect_id_columns(df):
+            if id_col.name != target and id_col.name not in plan.drop_columns:
+                plan.drop_columns.append(id_col.name)
+                plan.notes.append(f"Colonne '{id_col.name}' traitée comme identifiant : {id_col.reason}")
+
         for col in df.columns:
             if col == target:
                 continue
@@ -237,6 +245,7 @@ class PreprocessingAgent:
             target_encoder=target_encoder,
             target_name=target,
         )
+
 
 
 

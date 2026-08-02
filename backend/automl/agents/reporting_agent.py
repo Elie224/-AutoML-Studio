@@ -58,6 +58,28 @@ HTML_TEMPLATE = Template("""<!doctype html>
   </section>
 
   <section>
+    <h2>Diagnostic intelligent</h2>
+    {% if result.eda %}
+    {% set q = result.eda.quality_score or {} %}
+    <p><strong>Score qualité :</strong> {{ q.get('score', 0) }}/100 ({{ q.get('grade', '?') }})</p>
+    {% if result.eda.id_columns %}
+    <p><strong>Identifiants détectés :</strong>
+      {% for col in result.eda.id_columns %}<span class="badge">{{ col.name }}</span>{% endfor %}
+    </p>
+    {% endif %}
+    {% if q.get('issues') %}
+    <ul class="insights">{% for issue in q['issues'] %}<li>{{ issue }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if result.target_suggestions %}
+    <h3>Cibles suggérées</h3>
+    <ul>{% for s in result.target_suggestions[:3] %}
+      <li><code>{{ s.column }}</code> → {{ s.problem_type }} (score {{ s.score }})</li>
+    {% endfor %}</ul>
+    {% endif %}
+    {% else %}<p>Aucun EDA disponible.</p>{% endif %}
+  </section>
+
+  <section>
     <h2>Insights EDA</h2>
     {% if result.eda %}
     <ul class="insights">
@@ -287,3 +309,6 @@ class ReportingAgent:
             "anomaly_detection": "n_anomalies",
             "time_series": "mape",
         }.get(result.problem_type.value, "score")
+
+
+

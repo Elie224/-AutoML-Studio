@@ -17,13 +17,13 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from automl.agents.qa_agent import QAAgent  # noqa: E402
 from automl.core.config import get_settings  # noqa: E402
+from automl.agents.eda_agent import EDAAgent  # noqa: E402
+from automl.agents.id_detector import detect_id_columns  # noqa: E402
+from automl.agents.preprocessing_agent import PreprocessingAgent  # noqa: E402
+from automl.agents.problem_detection_agent import ProblemDetectionAgent  # noqa: E402
+from automl.agents.target_recommender import recommend_target  # noqa: E402
 from automl.core.io import SUPPORTED_EXTENSIONS, find_dataset_file  # noqa: E402
 from automl.pipeline import AutoMLPipeline  # noqa: E402
-
-
-st.set_page_config(page_title="AutoML Studio", page_icon="🧠", layout="wide")
-settings = get_settings()
-ARTIFACTS_ROOT = settings.artifacts_root.resolve()
 
 
 def resolve_artifact(relative_path: Optional[str]) -> Optional[Path]:
@@ -80,6 +80,31 @@ with col2:
         st.dataframe(preview.head(10), width="stretch")
         target = st.selectbox("Colonne cible", options=["(aucune)"] + list(preview.columns))
         target = None if target == "(aucune)" else target
+
+        with st.expander("🔍 Diagnostic intelligent (avant lancement)", expanded=True):
+            try:
+                preview_meta = preview.copy()
+                id_cols = detect_id_columns(preview_meta)
+                id_names = [c.name for c in id_cols]
+                analysis = preview_meta.drop(columns=id_names, errors="ignore")
+                eda_preview = EDAAgent("preview").run(analysis, target=target)
+                suggestions = recommend_target(preview_meta, target)
+                q = eda_preview.quality_score or {}
+                st.metric("Score de qualité", f"{q.get('score', 0)}/100", q.get("grade", "?"))
+                if id_names:
+                    st.markdown(f"**🆔 Identifiants détectés** : {', '.join(id_names)}")
+                if suggestions:
+                    st.markdown("**🎯 Cibles suggérées :**")
+                    for s in suggestions[:3]:
+                        reasons = "; ".join(s.reasons)
+                        st.markdown(f"- `{s.column}` → {s.problem_type.value} (score {s.score}) — {reasons}")
+                if q.get("issues"):
+                    st.markdown("**⚠️ Problèmes identifiés :**")
+                    for issue in q["issues"]:
+                        st.markdown(f"- {issue}")
+            except Exception as exc:
+                st.warning(f"Diagnostic indisponible : {exc}")
+
         run_button = st.button("🚀 Lancer le pipeline AutoML", type="primary")
     else:
         target = None
@@ -111,6 +136,7 @@ if run_button and preview is not None:
             target=target,
             name=name,
             dataset_id=dataset_id,
+            persist_source=False,
             optuna_trials=optuna_trials,
             cv_folds=cv_folds,
             run_explainability=run_shap,
@@ -141,43 +167,104 @@ if result is not None and df is not None:
         st.json(result.best_model.metrics)
 
     with tabs[1]:
-        if result.eda:
-            st.write("Insights")
-            for insight in result.eda.insights:
+        if not result.eda:
+            st.info("Lance d'abord le pipeline.")
+        else:
+            eda = result.eda
+            quality = eda.quality_score or {}
+            score = quality.get("score", 0)
+            grade = quality.get("grade", "?")
+            st.subheader(f"Qualité des données : {score}/100 ({grade})")
+            for issue in quality.get("issues", []):
+                st.markdown(f"- ⚠️ {issue}")
+            if eda.id_columns:
+                names = ", ".join(c.get("name", "?") for c in eda.id_columns)
+                st.markdown(f"- 🆔 Identifiants détectés : **{names}** (exclus des analyses)")
+            st.subheader("Insights")
+            for insight in eda.insights:
                 st.markdown(f"- {insight}")
-            st.write("Figures")
+            st.subheader("Cible suggérée")
+            if result.target_suggestions:
+                for s in result.target_suggestions[:3]:
+                    st.markdown(f"  - `{s.get("column")}` → {s.get("problem_type")} (score {s.get("score")})")
+            st.subheader("Figures")
             figure_cols = st.columns(2)
-            for idx, fig in enumerate(result.eda.figures):
+            for idx, fig in enumerate(eda.figures):
                 with figure_cols[idx % 2]:
                     full_path = resolve_artifact(fig)
                     if full_path and full_path.is_file():
                         st.image(str(full_path), caption=Path(fig).name)
                     else:
                         st.warning(f"Figure introuvable : {fig}")
-        else:
-            st.info("Lance d'abord le pipeline.")
 
     with tabs[2]:
-        preprocessing = result.preprocessing
-        if hasattr(preprocessing, "to_dict"):
-            st.json(preprocessing.to_dict())
+        plan = result.preprocessing
+        drop = list(plan.drop_columns or [])
+        impute = plan.imputation or {}
+        encoders = plan.encoders or {}
+        st.subheader("Colonnes supprimées")
+        if drop:
+            for col in drop: st.markdown(f"- 🗑️ **{col}**")
         else:
-            st.json(preprocessing)
+            st.markdown("_Aucune colonne supprimée._")
+        st.subheader("Imputation des valeurs manquantes")
+        if impute:
+            for col, strategy in impute.items():
+                st.markdown(f"- `{col}` → {strategy}")
+        else:
+            st.markdown("_Aucune imputation nécessaire._")
+        st.subheader("Encodage")
+        if encoders:
+            for col, strategy in encoders.items():
+                st.markdown(f"- `{col}` → {strategy}")
+        else:
+            st.markdown("_Aucun encodage défini._")
+        st.subheader("Normalisation")
+        st.markdown(f"- Mise à l'échelle : **{plan.scaling}**")
+        if plan.feature_engineering:
+            st.subheader("Feature engineering")
+            for rule in plan.feature_engineering:
+                st.markdown(f"- {rule}")
+        if plan.rationale:
+            st.subheader("Justification")
+            for note in plan.rationale:
+                st.markdown(f"- {note}")
+        with st.expander("Configuration technique (JSON)"):
+            st.json(plan.to_dict() if hasattr(plan, "to_dict") else plan)
 
     with tabs[3]:
         rows = []
-        for m in result.leaderboard:
-            rows.append({"Model": m.name, "Primary metric": m.metrics, "Time (s)": m.training_time_s})
-        st.dataframe(pd.DataFrame(rows), width="stretch")
+        for rank, m in enumerate(result.leaderboard, start=1):
+            row = {"#": rank, "Modèle": m.name, "Temps (s)": round(m.training_time_s, 2)}
+            for metric_name, metric_value in (m.metrics or {}).items():
+                row[metric_name] = metric_value
+            rows.append(row)
+        df_lb = pd.DataFrame(rows)
+        st.dataframe(df_lb, width="stretch")
+        if not df_lb.empty:
+            metric_cols = [c for c in df_lb.columns if c not in {"#", "Modèle", "Temps (s)"}]
+            if metric_cols:
+                primary = metric_cols[0]
+                chart_df = df_lb[["Modèle", primary]].set_index("Modèle")
+                st.bar_chart(chart_df)
 
     with tabs[4]:
-        if result.explainability:
+        if not result.explainability:
+            st.info("Explicabilité non disponible." )
+        else:
             st.write("Méthode:", result.explainability.method)
             items = list(result.explainability.feature_importance.items())[:15]
-            imp_df = pd.DataFrame(items, columns=["feature", "importance"])
-            st.bar_chart(imp_df.set_index("feature"))
-        else:
-            st.info("SHAP non disponible.")
+            if items:
+                imp_df = pd.DataFrame(items, columns=["feature", "importance"])
+                st.bar_chart(imp_df.set_index("feature"))
+            if result.problem_type.value in {"clustering", "anomaly_detection"}:
+                st.subheader("Profils de clusters")
+                for note in result.explainability.notes:
+                    st.markdown(f"- {note}")
+            for fig in result.explainability.figures:
+                full_path = resolve_artifact(fig)
+                if full_path and full_path.is_file():
+                    st.image(str(full_path), caption=Path(fig).name)
 
     with tabs[5]:
         st.subheader("Posez une question en langage naturel")
@@ -198,33 +285,20 @@ if result is not None and df is not None:
 
         html_path = resolve_artifact(result.report_paths.get("html"))
         if html_path and html_path.is_file():
-            st.download_button(
-                "Télécharger le rapport HTML",
-                data=html_path.read_bytes(),
-                file_name="report.html",
-                mime="text/html",
-            )
+            st.download_button("Télécharger le rapport HTML", data=html_path.read_bytes(), file_name="report.html", mime="text/html")
         else:
             st.warning(f"Rapport HTML introuvable ({html_path}).")
 
         pdf_path = resolve_artifact(result.report_paths.get("pdf"))
         if pdf_path and pdf_path.is_file():
-            st.download_button(
-                "Télécharger le rapport PDF",
-                data=pdf_path.read_bytes(),
-                file_name="report.pdf",
-                mime="application/pdf",
-            )
+            st.download_button("Télécharger le rapport PDF", data=pdf_path.read_bytes(), file_name="report.pdf", mime="application/pdf")
         else:
             st.warning(f"Rapport PDF introuvable ({pdf_path}).")
 
         pipeline_path = resolve_artifact(result.artifacts.get("pipeline"))
         if pipeline_path and pipeline_path.is_file():
-            st.download_button(
-                "Télécharger le pipeline",
-                data=pipeline_path.read_bytes(),
-                file_name="pipeline.joblib",
-                mime="application/octet-stream",
-            )
+            st.download_button("Télécharger le pipeline", data=pipeline_path.read_bytes(), file_name="pipeline.joblib", mime="application/octet-stream")
         else:
             st.warning(f"Pipeline introuvable ({pipeline_path}).")
+
+

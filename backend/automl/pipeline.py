@@ -17,6 +17,7 @@ from .agents.explainability_agent import ExplainabilityAgent
 from .agents.feature_engineering_agent import FeatureEngineeringAgent
 from .agents.preprocessing_agent import PreprocessingAgent
 from .agents.problem_detection_agent import ProblemDetectionAgent
+from .agents.target_recommender import recommend_target
 from .agents.qa_agent import QAAgent
 from .agents.reporting_agent import ReportingAgent
 from .agents.training_agent import TrainingAgent
@@ -86,6 +87,12 @@ class AutoMLPipeline:
         summary.problem_type = problem_type
         store_metadata(summary)
 
+        target_suggestions = recommend_target(self.df, self.target)
+        self.target_suggestions = [
+            {'column': s.column, 'problem_type': s.problem_type.value, 'score': s.score, 'reasons': s.reasons}
+            for s in target_suggestions
+        ]
+
         preprocessing_agent = PreprocessingAgent()
         preprocessing_plan = preprocessing_agent.suggest_plan(self.df, self.target)
         prepared = preprocessing_agent.prepare(self.df, self.target)
@@ -130,6 +137,7 @@ class AutoMLPipeline:
                 "pipeline": training.best_model.pipeline_path,
                 "model": training.best_model.artifact_path,
             },
+            target_suggestions=self.target_suggestions,
         )
 
         reporter = ReportingAgent(self.dataset_id)
@@ -165,6 +173,7 @@ class AutoMLPipeline:
     def ask(self, question: str, eda: EDAResult | None = None, leaderboard=None) -> dict[str, Any]:
         qa = QAAgent(self.df, target=self.target, eda=eda, leaderboard=leaderboard or [])
         return qa.ask(question)
+
 
 
 
