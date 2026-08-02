@@ -22,6 +22,82 @@ from automl.pipeline import AutoMLPipeline  # noqa: E402
 st.set_page_config(page_title='AutoML Studio', page_icon='🧠', layout='wide')
 settings = get_settings()
 ARTIFACTS_ROOT = settings.artifacts_root.resolve()
+# ----------------------------------------------------------------------
+# Design system
+# ----------------------------------------------------------------------
+THEME_CSS = '''
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: #111a33;
+    --panel-2: #162241;
+    --ink: #e6edff;
+    --muted: #93a4c4;
+    --accent: #6366f1;
+    --accent-2: #22d3ee;
+    --good: #22c55e;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+  }
+  .stApp { background: radial-gradient(1200px 600px at 80% -10%, #1d2a5a 0%, var(--bg) 60%) fixed; color: var(--ink); }
+  header[data-testid='stHeader'] { background: transparent; }
+  section.main > div { padding-top: 0; }
+  .ams-hero {
+    background: linear-gradient(135deg, #1e3a8a 0%, #4f46e5 45%, #06b6d4 100%);
+    border-radius: 18px; padding: 36px 44px; color: white;
+    box-shadow: 0 10px 30px rgba(2,6,23,.45); margin-bottom: 22px;
+  }
+  .ams-hero h1 { margin: 0 0 8px 0; font-size: 32px; font-weight: 800; letter-spacing: -0.01em; }
+  .ams-hero p { margin: 0; opacity: .92; font-size: 15px; }
+  .ams-hero .ams-badges { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .ams-hero .ams-badge {
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25);
+    color: white; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .ams-card {
+    background: var(--panel); border: 1px solid #1f2a4a; border-radius: 14px;
+    padding: 18px 20px; box-shadow: 0 1px 0 rgba(255,255,255,.03);
+  }
+  .ams-stepper { display: flex; gap: 8px; margin: 18px 0 24px 0; flex-wrap: wrap; }
+  .ams-step {
+    flex: 1 1 120px; background: var(--panel); border: 1px solid #1f2a4a;
+    border-radius: 12px; padding: 12px 14px; color: var(--muted);
+  }
+  .ams-step .ams-step-num { font-size: 11px; opacity: .7; }
+  .ams-step .ams-step-title { font-size: 14px; color: var(--ink); font-weight: 600; margin-top: 2px; }
+  .ams-step.ams-step-active { border-color: var(--accent); background: linear-gradient(180deg, #1a2550, var(--panel)); }
+  .ams-step.ams-step-done { border-color: var(--good); }
+  .ams-grade {
+    display: inline-block; padding: 6px 14px; border-radius: 999px; font-weight: 700; font-size: 12px;
+    color: white; letter-spacing: .04em;
+  }
+  .ams-grade-excellent { background: var(--good); }
+  .ams-grade-bon { background: #4ade80; }
+  .ams-grade-moyen { background: var(--warn); }
+  .ams-grade-faible { background: var(--bad); }
+  .ams-section-title {
+    font-size: 18px; font-weight: 700; margin: 18px 0 10px 0; color: var(--ink);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ams-section-title .ams-section-icon {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: inline-flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  div[data-testid='stFileUploader'] section { background: var(--panel-2); border: 1px dashed #2a3565; border-radius: 12px; }
+  div[data-testid='stMetricValue'] { color: var(--ink); }
+  .stButton>button { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; border: 0; font-weight: 600; }
+  .stButton>button:hover { filter: brightness(1.08); }
+  .stTabs [data-baseweb='tab-list'] { background: var(--panel); border-radius: 12px; padding: 4px; gap: 4px; }
+  .stTabs [data-baseweb='tab'] { color: var(--muted); border-radius: 8px; padding: 8px 14px; }
+  .stTabs [aria-selected='true'] { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; }
+  .ams-footer { text-align: center; color: var(--muted); padding: 32px 0 12px 0; font-size: 12px; }
+</style>
+'''
+st.markdown(THEME_CSS, unsafe_allow_html=True)
+
+
+
 
 
 
@@ -41,29 +117,61 @@ def resolve_artifact(relative_path: Optional[str]) -> Optional[Path]:
 # Sidebar
 # ----------------------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ Paramètres")
-    optuna_trials = st.slider("Essais Optuna", min_value=0, max_value=50, value=10, step=5)
+    st.markdown("#### ⚙️ Paramètres")
+    optuna_trials = st.slider("Essais Optuna", min_value=0, max_value=50, value=10, step=5, help="Plus d'essais = meilleure optimisation, mais plus lent.")
     cv_folds = st.slider("Folds CV", min_value=2, max_value=10, value=5)
     run_shap = st.checkbox("Calculer SHAP", value=True)
     st.markdown("---")
-    st.markdown("**Mode démo** : charger le dataset Titanic ou téléversez le vôtre.")
+    st.caption("Mode démo — charge le dataset Titanic ou téléverse le tien (CSV, Excel, Parquet, JSON, TSV).")
+
+# ----------------------------------------------------------------------
+# Hero
+# ----------------------------------------------------------------------
+st.markdown('''
+<div class="ams-hero">
+  <h1>🧠 AutoML Studio</h1>
+  <p>Importe un dataset, lance le pipeline et obtiens un modèle entraîné, explicable et déployable — sans une ligne de code.</p>
+  <div class="ams-badges">
+    <span class="ams-badge">10 agents spécialisés</span>
+    <span class="ams-badge">EDA · Prétraitement · Modélisation</span>
+    <span class="ams-badge">SHAP · LIME · PDP</span>
+    <span class="ams-badge">Exports HTML / PDF / Notebook</span>
+  </div>
+</div>
+''', unsafe_allow_html=True)
+
+# ----------------------------------------------------------------------
+# Stepper
+# ----------------------------------------------------------------------
+st.markdown('''
+<div class="ams-stepper">
+  <div class="ams-step ams-step-active"><div class="ams-step-num">ÉTAPE 1</div><div class="ams-step-title">📂 Importer</div></div>
+  <div class="ams-step"><div class="ams-step-num">ÉTAPE 2</div><div class="ams-step-title">🔍 Comprendre</div></div>
+  <div class="ams-step"><div class="ams-step-num">ÉTAPE 3</div><div class="ams-step-title">🎯 Cibler</div></div>
+  <div class="ams-step"><div class="ams-step-num">ÉTAPE 4</div><div class="ams-step-title">🚀 Entraîner</div></div>
+  <div class="ams-step"><div class="ams-step-num">ÉTAPE 5</div><div class="ams-step-title">🧠 Expliquer</div></div>
+  <div class="ams-step"><div class="ams-step-num">ÉTAPE 6</div><div class="ams-step-title">📥 Exporter</div></div>
+</div>
+''', unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------
 # Dataset selection
 # ----------------------------------------------------------------------
 SAMPLE = Path(__file__).resolve().parents[1] / "data" / "samples" / "titanic.csv"
-col1, col2 = st.columns([2, 1])
+col1, col2 = st.columns([3, 2])
 
 with col1:
-    st.subheader("1️⃣ Importer un dataset")
+    st.markdown('<div class="ams-section-title"><span class="ams-section-icon">1</span>Importer un dataset</div>', unsafe_allow_html=True)
     uploaded = st.file_uploader(
-        "CSV / TSV / Excel / Parquet / JSON",
+        "Glisse ton fichier ici (CSV, TSV, Excel, Parquet, JSON)",
         type=[ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS],
+        help="Formats supportés : CSV, TSV, Excel, Parquet, JSON, JSONL.",
+        label_visibility="collapsed",
     )
-    use_sample = st.button("Utiliser le dataset Titanic (démo)")
+    use_sample = st.button("🎲 Charger le dataset Titanic (démo)", use_container_width=True)
 
 with col2:
-    st.subheader("Aperçu")
+    st.markdown('<div class="ams-section-title"><span class="ams-section-icon">👁</span>Aperçu</div>', unsafe_allow_html=True)
     preview = None
     run_button = False
     if uploaded is not None:
@@ -73,15 +181,15 @@ with col2:
             try:
                 preview = pd.read_excel(uploaded)
             except Exception as exc:
-                st.error(f"Lecture impossible: {exc}")
+                st.error(f"Lecture impossible : {exc}")
     elif use_sample and SAMPLE.exists():
         preview = pd.read_csv(SAMPLE)
     if preview is not None:
-        st.dataframe(preview.head(10), width="stretch")
-        target = st.selectbox("Colonne cible", options=["(aucune)"] + list(preview.columns))
+        st.dataframe(preview.head(8), use_container_width=True, height=240)
+        target = st.selectbox("Colonne cible (laisser « aucune » pour le clustering)", options=["(aucune)"] + list(preview.columns), index=0)
         target = None if target == "(aucune)" else target
 
-        with st.expander("🔍 Diagnostic intelligent (avant lancement)", expanded=True):
+        with st.expander("🔍 Diagnostic intelligent", expanded=True):
             suggested_target = None
             try:
                 preview_meta = preview.copy()
@@ -91,29 +199,53 @@ with col2:
                 eda_preview = EDAAgent("preview").run(analysis, target=target)
                 suggestions = recommend_target(preview_meta, target)
                 q = eda_preview.quality_score or {}
-                st.metric("Score de qualité", f"{q.get('score', 0)}/100", q.get("grade", "?"))
+                score = q.get("score", 0)
+                grade = q.get("grade", "?")
+                grade_class = {
+                    "excellent": "ams-grade-excellent",
+                    "bon": "ams-grade-bon",
+                    "moyen": "ams-grade-moyen",
+                    "faible": "ams-grade-faible",
+                }.get(str(grade).lower(), "")
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px;'>"
+                    f"<div style='font-size:32px;font-weight:800;color:var(--ink);'>{score}<span style='font-size:14px;color:var(--muted);'>/100</span></div>"
+                    f"<span class='ams-grade {grade_class}'>{grade.upper()}</span></div>",
+                    unsafe_allow_html=True,
+                )
                 if id_names:
-                    st.markdown(f"**🆔 Identifiants détectés** : {', '.join(id_names)}")
-                if suggestions:
-                    st.markdown("**🎯 Cibles suggérées :**")
-                    for s in suggestions[:3]:
-                        reasons = "; ".join(s.reasons)
-                        st.markdown(f"- `{s.column}` → **{s.problem_type.value}** (score {s.score}) — {reasons}")
-                    if target is None:
-                        apply = st.checkbox(f"✅ Utiliser `{suggestions[0].column}` comme cible (problème {suggestions[0].problem_type.value})", value=True, key="apply_suggestion")
-                        if apply:
-                            suggested_target = suggestions[0].column
+                    st.markdown(f"🆔 **Identifiants détectés** : `{'`, `'.join(id_names)}` (exclus)")
                 if q.get("issues"):
                     st.markdown("**⚠️ Problèmes identifiés :**")
                     for issue in q["issues"]:
                         st.markdown(f"- {issue}")
+                if suggestions:
+                    st.markdown("**🎯 Cibles suggérées :**")
+                    for s in suggestions[:3]:
+                        reasons = "; ".join(s.reasons)
+                        st.markdown(f"- `{s.column}` → **{s.problem_type.value}** _(score {s.score})_ — {reasons}")
+                    if target is None:
+                        apply = st.checkbox(
+                            f"✅ Utiliser `{suggestions[0].column}` comme cible (problème {suggestions[0].problem_type.value})",
+                            value=True,
+                            key="apply_suggestion",
+                        )
+                        if apply:
+                            suggested_target = suggestions[0].column
+                breakdown = q.get("breakdown", []) or []
+                if breakdown:
+                    with st.expander("🧮 Décomposition du score", expanded=False):
+                        st.caption("Pénalités appliquées (triées par impact décroissant) :")
+                        for delta, label, evidence in breakdown:
+                            st.markdown(f"- **−{delta} pts** : `{label}` — {evidence}")
             except Exception as exc:
                 st.warning(f"Diagnostic indisponible : {exc}")
             if suggested_target and target is None:
                 target = suggested_target
+
+        run_button = st.button("🚀 Lancer le pipeline AutoML", type="primary", use_container_width=True)
     else:
         target = None
-        run_button = False
 
 # ----------------------------------------------------------------------
 # Pipeline run
@@ -157,19 +289,27 @@ if run_button and preview is not None:
 result = st.session_state.get("last_result")
 df = st.session_state.get("last_df")
 if result is not None and df is not None:
-    st.markdown("---")
-    st.header("2️⃣ Résultats")
+    st.markdown('''<div class="ams-section-title" style="margin-top:32px;"><span class="ams-section-icon">2</span>Résultats du pipeline</div>''', unsafe_allow_html=True)
 
     tabs = st.tabs(["📊 Vue d'ensemble", "🔬 EDA", "🧹 Prétraitement", "🏆 Leaderboard", "🧠 Explicabilité", "💬 Q&A", "📥 Exports"])
 
     with tabs[0]:
         col_a, col_b, col_c, col_d = st.columns(4)
-        col_a.metric("Lignes", f"{result.dataset.rows}")
-        col_b.metric("Colonnes", f"{result.dataset.columns}")
-        col_c.metric("Type de problème", result.problem_type.value)
-        col_d.metric("Meilleur modèle", result.best_model.name)
-        st.subheader("Métriques du meilleur modèle")
-        st.json(result.best_model.metrics)
+        for col, label, value in [
+            (col_a, "Lignes", f"{result.dataset.rows:,}"),
+            (col_b, "Colonnes", f"{result.dataset.columns}"),
+            (col_c, "Type de problème", result.problem_type.value),
+            (col_d, "Meilleur modèle", result.best_model.name),
+        ]:
+            col.markdown(
+                f'''<div class="ams-card"><h3>{label}</h3><div class="ams-value">{value}</div></div>''',
+                unsafe_allow_html=True,
+            )
+        st.markdown("#### Métriques du meilleur modèle")
+        metric_rows = ""
+        for k, v in (result.best_model.metrics or {}).items():
+            metric_rows += f'''<div class="ams-card" style="margin:6px 0;"><h3>{k}</h3><div class="ams-value">{v:.4f}</div></div>'''
+        st.markdown(metric_rows, unsafe_allow_html=True)
 
     with tabs[1]:
         if not result.eda:
@@ -179,17 +319,20 @@ if result is not None and df is not None:
             quality = eda.quality_score or {}
             score = quality.get("score", 0)
             grade = quality.get("grade", "?")
-            quality_col, badge_col = st.columns([3, 1])
-            with quality_col:
-                st.subheader(f"Qualité des données : {score}/100")
-            with badge_col:
-                grade_color = {
-                    "excellent": "#16a34a",
-                    "bon": "#22c55e",
-                    "moyen": "#f59e0b",
-                    "faible": "#ef4444",
-                }.get(str(grade).lower(), "#64748b")
-                st.markdown(f"<span style=\"background:{grade_color};color:white;padding:6px 12px;border-radius:999px;font-weight:600\">{grade.upper()}</span>", unsafe_allow_html=True)
+            grade_class = {
+                "excellent": "ams-grade-excellent",
+                "bon": "ams-grade-bon",
+                "moyen": "ams-grade-moyen",
+                "faible": "ams-grade-faible",
+            }.get(str(grade).lower(), "")
+            st.markdown(
+                f"""<div style="display:flex;align-items:center;gap:14px;margin:6px 0 18px 0;">
+                <div style="font-size:42px;font-weight:800;color:var(--ink);line-height:1;">{score}<span style="font-size:14px;color:var(--muted);">/100</span></div>
+                <span class="ams-grade {grade_class}">{grade.upper()}</span>
+                <div style="color:var(--muted);font-size:13px;">Qualité globale du dataset</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
             with st.expander("⚠️ Problèmes identifiés", expanded=True):
                 issues = quality.get("issues", [])
                 if issues:
@@ -337,6 +480,7 @@ if result is not None and df is not None:
             st.warning(f"Pipeline introuvable ({pipeline_path}).")
 
 
-
-
-
+st.markdown(
+    '''<div class="ams-footer">AutoML Studio · 10 agents spécialisés · EDA · Prétraitement · Modélisation · Explicabilité · Déploiement</div>''',
+    unsafe_allow_html=True,
+)
