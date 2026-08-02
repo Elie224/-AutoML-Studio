@@ -65,6 +65,7 @@ with col1:
 with col2:
     st.subheader("Aperçu")
     preview = None
+    run_button = False
     if uploaded is not None:
         try:
             preview = pd.read_csv(uploaded)
