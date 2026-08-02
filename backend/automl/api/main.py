@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -11,15 +10,19 @@ import joblib
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..agents.eda_agent import EDAAgent
-from ..agents.preprocessing_agent import PreprocessingAgent
 from ..agents.qa_agent import QAAgent
 from ..core.config import get_settings
-from ..core.io import dataframe_summary, load_csv, store_metadata
-from ..core.schema import ProblemType
+from ..core.io import (
+    SUPPORTED_EXTENSIONS,
+    dataframe_summary,
+    find_dataset_file,
+    load_csv,
+    store_metadata,
+)
 from ..pipeline import AutoMLPipeline
 
 
@@ -73,6 +76,10 @@ async def upload_dataset(file: UploadFile = File(...), target: str | None = Form
     saved_path = target_dir / safe_name
     saved_path.write_bytes(payload)
 
+    suffix = saved_path.suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file extension: {suffix}")
+
     try:
         df = load_csv(saved_path)
     except Exception as exc:
@@ -95,13 +102,14 @@ def dataset_info(dataset_id: str) -> dict[str, Any]:
 @app.get("/eda/{dataset_id}")
 def eda(dataset_id: str, target: str | None = None) -> dict[str, Any]:
     settings = get_settings()
-    summary_path = settings.upload_root / dataset_id / "summary.json"
+    dataset_dir = settings.upload_root / dataset_id
+    summary_path = dataset_dir / "summary.json"
     if not summary_path.exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
-    data_files = list((settings.upload_root / dataset_id).glob("*.csv")) + list((settings.upload_root / dataset_id).glob("*.parquet"))
-    if not data_files:
+    data_file = find_dataset_file(dataset_dir)
+    if data_file is None:
         raise HTTPException(status_code=400, detail="Dataset file missing")
-    df = load_csv(data_files[0])
+    df = load_csv(data_file)
     result = EDAAgent(dataset_id).run(df, target=target)
     return result.to_dict()
 
@@ -117,19 +125,20 @@ class RunRequest(BaseModel):
 @app.post("/run")
 def run_pipeline(req: RunRequest) -> dict[str, Any]:
     settings = get_settings()
-    upload_dir = settings.upload_root / req.dataset_id
-    files = list(upload_dir.glob("*.csv")) + list(upload_dir.glob("*.parquet")) + list(upload_dir.glob("*.xlsx"))
-    if not files:
+    dataset_dir = settings.upload_root / req.dataset_id
+    data_file = find_dataset_file(dataset_dir)
+    if data_file is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
     pipeline = AutoMLPipeline(
-        source=files[0],
+        source=data_file,
         target=req.target,
-        name=files[0].stem,
+        name=data_file.stem,
+        dataset_id=req.dataset_id,
+        persist_source=False,
         optuna_trials=req.optuna_trials,
         cv_folds=req.cv_folds,
         run_explainability=req.run_explainability,
     )
-    pipeline.dataset_id = req.dataset_id
     result = pipeline.run()
     return result.to_dict()
 
@@ -142,10 +151,10 @@ class QARequest(BaseModel):
 @app.post("/qa")
 def qa(req: QARequest) -> dict[str, Any]:
     settings = get_settings()
-    files = list((settings.upload_root / req.dataset_id).glob("*.csv")) + list((settings.upload_root / req.dataset_id).glob("*.parquet"))
-    if not files:
+    data_file = find_dataset_file(settings.upload_root / req.dataset_id)
+    if data_file is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    df = load_csv(files[0])
+    df = load_csv(data_file)
     summary_path = settings.upload_root / req.dataset_id / "summary.json"
     target = None
     if summary_path.exists():
@@ -190,10 +199,21 @@ def report(dataset_id: str, kind: str):
     return FileResponse(target)
 
 
+def _safe_resolve(relative_path: str) -> Path:
+    """Resolve `relative_path` against the artifacts root and ensure it stays inside."""
+    settings = get_settings()
+    root = settings.artifacts_root.resolve()
+    candidate = (root / relative_path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid artifact path") from exc
+    return candidate
+
+
 @app.get("/artifact")
 def artifact(path: str):
-    settings = get_settings()
-    full = settings.artifacts_root / path
-    if not full.exists() or not full.is_file():
+    full = _safe_resolve(path)
+    if not full.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(full)

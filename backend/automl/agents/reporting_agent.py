@@ -1,10 +1,11 @@
 """Reporting Agent: writes an executive HTML report, a PDF summary and a Jupyter
-notebook that reproduces the pipeline end-to-end.
+notebook that reproduces the pipeline end-to-end. The HTML report embeds all
+figures as base64 data URIs so it can be opened standalone or downloaded.
 """
 from __future__ import annotations
 
+import base64
 import json
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +32,7 @@ HTML_TEMPLATE = Template("""<!doctype html>
   th{background:#eef2ff;}
   .insights li{margin:6px 0;}
   figure img{max-width:100%;border-radius:8px;border:1px solid #e2e8f0;}
+  figure figcaption{font-size:12px;color:#64748b;text-align:center;margin-top:6px;}
   .badge{display:inline-block;padding:4px 10px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:12px;margin-right:6px;}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;}
   .card{background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #e2e8f0;}
@@ -95,29 +97,48 @@ HTML_TEMPLATE = Template("""<!doctype html>
     <h2>Explicabilité (SHAP)</h2>
     {% if result.explainability %}
     <p>Méthode : {{ result.explainability.method }}</p>
-    <ol>{% for name, value in result.explainability_top %}
+    <ol>{% for name, value in explainability_top %}
       <li><strong>{{ name }}</strong> — importance {{ "%.4f"|format(value) }}</li>
     {% endfor %}</ol>
     {% else %}<p>Aucune explicabilité calculée.</p>{% endif %}
   </section>
 
   <section>
-    <h2>Figures</h2>
-    {% if result.eda %}
-      {% for fig in result.eda.figures %}
-      <figure><img src="../{{ fig }}" alt="{{ fig }}" /></figure>
+    <h2>Figures (intégrées en base64)</h2>
+    {% if figure_blocks %}
+      {% for block in figure_blocks %}
+      <figure>
+        <img src="{{ block.data_uri }}" alt="{{ block.label }}" />
+        <figcaption>{{ block.label }}</figcaption>
+      </figure>
       {% endfor %}
-    {% endif %}
-    {% if result.explainability %}
-      {% for fig in result.explainability.figures %}
-      <figure><img src="../{{ fig }}" alt="{{ fig }}" /></figure>
-      {% endfor %}
+    {% else %}
+      <p>Aucune figure générée.</p>
     {% endif %}
   </section>
 </main>
 </body>
 </html>
 """)
+
+
+def _figure_to_data_uri(figure_path: Path, artifacts_root: Path) -> dict[str, str] | None:
+    """Embed a PNG figure as a base64 data URI. Returns None if missing."""
+    try:
+        full = (artifacts_root / figure_path).resolve()
+    except Exception:
+        return None
+    if not full.is_file():
+        return None
+    try:
+        data = full.read_bytes()
+    except OSError:
+        return None
+    encoded = base64.b64encode(data).decode("ascii")
+    return {
+        "label": Path(figure_path).name,
+        "data_uri": f"data:image/png;base64,{encoded}",
+    }
 
 
 class ReportingAgent:
@@ -133,9 +154,22 @@ class ReportingAgent:
         primary_metric = self._primary_metric(result)
         primary_value = result.best_model.metrics.get(primary_metric, 0.0)
         total_time = sum(m.training_time_s for m in result.leaderboard)
-        explainability_top = []
+        explainability_top: list[tuple[str, float]] = []
         if result.explainability:
             explainability_top = list(result.explainability.feature_importance.items())[:10]
+
+        figure_blocks: list[dict[str, str]] = []
+        if result.eda:
+            for fig in result.eda.figures:
+                block = _figure_to_data_uri(Path(fig), self.settings.artifacts_root)
+                if block is not None:
+                    figure_blocks.append(block)
+        if result.explainability:
+            for fig in result.explainability.figures:
+                block = _figure_to_data_uri(Path(fig), self.settings.artifacts_root)
+                if block is not None:
+                    figure_blocks.append(block)
+
         html = HTML_TEMPLATE.render(
             result=result,
             now=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
@@ -143,6 +177,7 @@ class ReportingAgent:
             primary_value=f"{primary_value:.4f}",
             total_time=f"{total_time:.1f}",
             explainability_top=explainability_top,
+            figure_blocks=figure_blocks,
         )
         path = self.report_dir / "report.html"
         path.write_text(html, encoding="utf-8")
@@ -252,7 +287,3 @@ class ReportingAgent:
             "anomaly_detection": "n_anomalies",
             "time_series": "mape",
         }.get(result.problem_type.value, "score")
-
-
-
-

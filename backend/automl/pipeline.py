@@ -44,6 +44,8 @@ class AutoMLPipeline:
         source: str | Path | bytes,
         target: str | None = None,
         name: str | None = None,
+        dataset_id: str | None = None,
+        persist_source: bool = True,
         optuna_trials: int = 15,
         cv_folds: int = 5,
         run_explainability: bool = True,
@@ -53,21 +55,20 @@ class AutoMLPipeline:
         self.optuna_trials = optuna_trials
         self.cv_folds = cv_folds
         self.run_explainability = run_explainability
+        self.dataset_id = dataset_id or uuid.uuid4().hex[:12]
 
         if isinstance(source, (str, Path)):
-            source = Path(source)
-            if not source.exists():
-                raise FileNotFoundError(source)
-            dataset_id = uuid.uuid4().hex[:12]
-            saved = save_upload(source, source.name)
+            source_path = Path(source)
+            if not source_path.exists():
+                raise FileNotFoundError(source_path)
+            saved = source_path
+            if persist_source:
+                saved = save_upload(source_path, source_path.name, dataset_id=self.dataset_id)
             self.df = load_csv(saved)
-            self.dataset_id = dataset_id
-            self.dataset_name = name or source.stem
+            self.dataset_name = name or source_path.stem
         else:
-            dataset_id = uuid.uuid4().hex[:12]
-            saved = save_upload(source, name or "upload.csv")
+            saved = save_upload(source, name or "upload.csv", dataset_id=self.dataset_id)
             self.df = load_csv(saved)
-            self.dataset_id = dataset_id
             self.dataset_name = (name or "upload").rsplit(".", 1)[0]
 
     # ------------------------------------------------------------------
@@ -164,6 +165,7 @@ class AutoMLPipeline:
     def ask(self, question: str, eda: EDAResult | None = None, leaderboard=None) -> dict[str, Any]:
         qa = QAAgent(self.df, target=self.target, eda=eda, leaderboard=leaderboard or [])
         return qa.ask(question)
+
 
 
 

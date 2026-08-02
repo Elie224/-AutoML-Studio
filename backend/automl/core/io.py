@@ -89,10 +89,34 @@ def load_api_json(payload: list[dict] | dict) -> pd.DataFrame:
     return pd.DataFrame(payload)
 
 
-def save_upload(payload: bytes | Path, original_name: str) -> Path:
-    """Persist an uploaded file under a unique id and return the saved path."""
+SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".json", ".jsonl"}
+
+
+EXCLUDED_BASENAMES = {"summary.json"}
+
+
+def find_dataset_file(dataset_dir: Path) -> Path | None:
+    """Return the first dataset file in `dataset_dir` matching a supported extension.
+
+    Skips AutoML Studio metadata files (e.g. `summary.json`) so the actual data
+    file is always returned.
+    """
+    if not dataset_dir.exists():
+        return None
+    for path in sorted(dataset_dir.iterdir()):
+        if not path.is_file():
+            continue
+        if path.name in EXCLUDED_BASENAMES:
+            continue
+        if path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            return path
+    return None
+
+
+def save_upload(payload: bytes | Path, original_name: str, dataset_id: str | None = None) -> Path:
+    """Persist an uploaded file under a unique (or caller-provided) id."""
     settings = get_settings()
-    dataset_id = uuid.uuid4().hex[:12]
+    dataset_id = dataset_id or uuid.uuid4().hex[:12]
     target_dir = settings.upload_root / dataset_id
     target_dir.mkdir(parents=True, exist_ok=True)
     safe_name = Path(original_name).name or "upload.csv"
@@ -140,3 +164,5 @@ def load_metadata(dataset_id: str) -> DatasetSummary | None:
     if data.get("problem_type"):
         data["problem_type"] = ProblemType(data["problem_type"])
     return DatasetSummary(**data)
+
+

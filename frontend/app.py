@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -16,16 +17,26 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from automl.agents.qa_agent import QAAgent  # noqa: E402
 from automl.core.config import get_settings  # noqa: E402
-from automl.core.io import dataframe_summary, store_metadata  # noqa: E402
+from automl.core.io import SUPPORTED_EXTENSIONS, find_dataset_file  # noqa: E402
 from automl.pipeline import AutoMLPipeline  # noqa: E402
 
 
 st.set_page_config(page_title="AutoML Studio", page_icon="🧠", layout="wide")
 settings = get_settings()
-ARTIFACTS_ROOT = settings.artifacts_root
+ARTIFACTS_ROOT = settings.artifacts_root.resolve()
 
-st.title("🧠 AutoML Studio")
-st.caption("Plateforme AutoML de bout en bout — ingestion, EDA, preprocessing, entraînement, explicabilité, déploiement.")
+
+def resolve_artifact(relative_path: Optional[str]) -> Optional[Path]:
+    """Resolve an artifact path defensively, ensuring it stays under ARTIFACTS_ROOT."""
+    if not relative_path:
+        return None
+    try:
+        candidate = (ARTIFACTS_ROOT / Path(relative_path)).resolve()
+        candidate.relative_to(ARTIFACTS_ROOT)
+    except (ValueError, OSError):
+        return None
+    return candidate
+
 
 # ----------------------------------------------------------------------
 # Sidebar
@@ -46,7 +57,10 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("1️⃣ Importer un dataset")
-    uploaded = st.file_uploader("CSV / Excel / Parquet", type=["csv", "tsv", "xlsx", "parquet"])
+    uploaded = st.file_uploader(
+        "CSV / TSV / Excel / Parquet / JSON",
+        type=[ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS],
+    )
     use_sample = st.button("Utiliser le dataset Titanic (démo)")
 
 with col2:
@@ -75,9 +89,11 @@ with col2:
 # Pipeline run
 # ----------------------------------------------------------------------
 if run_button and preview is not None:
+    dataset_id = "streamlit"
+    dataset_dir = settings.upload_root / dataset_id
+    dataset_dir.mkdir(parents=True, exist_ok=True)
     if uploaded is not None:
-        save_path = ARTIFACTS_ROOT / "uploads" / "_streamlit" / (uploaded.name or "upload.csv")
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path = dataset_dir / uploaded.name
         save_path.write_bytes(uploaded.getvalue())
         source = save_path
         name = Path(uploaded.name).stem
@@ -86,14 +102,15 @@ if run_button and preview is not None:
         name = SAMPLE.stem
 
     df = pd.read_csv(source) if str(source).endswith(".csv") else pd.read_excel(source)
-    summary = dataframe_summary(df, "streamlit", name, target=target)
-    store_metadata(summary)
+    summary = {"dataset_id": dataset_id, "name": name, "target": target}
+    st.session_state["dataset_meta"] = summary
 
     with st.spinner("Pipeline AutoML en cours..."):
         pipeline = AutoMLPipeline(
             source=source,
             target=target,
             name=name,
+            dataset_id=dataset_id,
             optuna_trials=optuna_trials,
             cv_folds=cv_folds,
             run_explainability=run_shap,
@@ -132,14 +149,20 @@ if result is not None and df is not None:
             figure_cols = st.columns(2)
             for idx, fig in enumerate(result.eda.figures):
                 with figure_cols[idx % 2]:
-                    full_path = ARTIFACTS_ROOT / fig
-                    if full_path.exists():
+                    full_path = resolve_artifact(fig)
+                    if full_path and full_path.is_file():
                         st.image(str(full_path), caption=Path(fig).name)
+                    else:
+                        st.warning(f"Figure introuvable : {fig}")
         else:
             st.info("Lance d'abord le pipeline.")
 
     with tabs[2]:
-        st.json(result.preprocessing.to_dict() if hasattr(result.preprocessing, "to_dict") else result.preprocessing)
+        preprocessing = result.preprocessing
+        if hasattr(preprocessing, "to_dict"):
+            st.json(preprocessing.to_dict())
+        else:
+            st.json(preprocessing)
 
     with tabs[3]:
         rows = []
@@ -160,7 +183,7 @@ if result is not None and df is not None:
         st.subheader("Posez une question en langage naturel")
         question = st.text_input("Ex: Pourquoi la cible est-elle déséquilibrée ?")
         if question:
-            qa = QAAgent(df, target=target, eda=result.eda, leaderboard=result.leaderboard)
+            qa = QAAgent(df, target=st.session_state.get("dataset_meta", {}).get("target"), eda=result.eda, leaderboard=result.leaderboard)
             response = qa.ask(question)
             st.info(response["answer"])
 
@@ -172,12 +195,36 @@ if result is not None and df is not None:
         for name, path in result.report_paths.items():
             if path:
                 st.write(f"- **{name}**: `{path}`")
-        if result.report_paths.get("html"):
-            with open(ARTIFACTS_ROOT / result.report_paths["html"], "rb") as f:
-                st.download_button("Télécharger le rapport HTML", f, file_name="report.html")
-        if result.report_paths.get("pdf"):
-            with open(ARTIFACTS_ROOT / result.report_paths["pdf"], "rb") as f:
-                st.download_button("Télécharger le rapport PDF", f, file_name="report.pdf")
-        if result.artifacts.get("pipeline"):
-            with open(ARTIFACTS_ROOT / result.artifacts["pipeline"], "rb") as f:
-                st.download_button("Télécharger le pipeline (joblib)", f, file_name="pipeline.joblib")
+
+        html_path = resolve_artifact(result.report_paths.get("html"))
+        if html_path and html_path.is_file():
+            st.download_button(
+                "Télécharger le rapport HTML",
+                data=html_path.read_bytes(),
+                file_name="report.html",
+                mime="text/html",
+            )
+        else:
+            st.warning(f"Rapport HTML introuvable ({html_path}).")
+
+        pdf_path = resolve_artifact(result.report_paths.get("pdf"))
+        if pdf_path and pdf_path.is_file():
+            st.download_button(
+                "Télécharger le rapport PDF",
+                data=pdf_path.read_bytes(),
+                file_name="report.pdf",
+                mime="application/pdf",
+            )
+        else:
+            st.warning(f"Rapport PDF introuvable ({pdf_path}).")
+
+        pipeline_path = resolve_artifact(result.artifacts.get("pipeline"))
+        if pipeline_path and pipeline_path.is_file():
+            st.download_button(
+                "Télécharger le pipeline",
+                data=pipeline_path.read_bytes(),
+                file_name="pipeline.joblib",
+                mime="application/octet-stream",
+            )
+        else:
+            st.warning(f"Pipeline introuvable ({pipeline_path}).")
