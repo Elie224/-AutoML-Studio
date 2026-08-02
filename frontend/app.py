@@ -183,25 +183,43 @@ if result is not None and df is not None:
             quality = eda.quality_score or {}
             score = quality.get("score", 0)
             grade = quality.get("grade", "?")
-            st.subheader(f"Qualité des données : {score}/100 ({grade})")
-            for issue in quality.get("issues", []):
-                st.markdown(f"- ⚠️ {issue}")
+            quality_col, badge_col = st.columns([3, 1])
+            with quality_col:
+                st.subheader(f"Qualité des données : {score}/100")
+            with badge_col:
+                grade_color = {
+                    "excellent": "#16a34a",
+                    "bon": "#22c55e",
+                    "moyen": "#f59e0b",
+                    "faible": "#ef4444",
+                }.get(str(grade).lower(), "#64748b")
+                st.markdown(f"<span style=\"background:{grade_color};color:white;padding:6px 12px;border-radius:999px;font-weight:600\">{grade.upper()}</span>", unsafe_allow_html=True)
+            with st.expander("⚠️ Problèmes identifiés", expanded=True):
+                issues = quality.get("issues", [])
+                if issues:
+                    for issue in issues:
+                        st.markdown(f"- {issue}")
+                else:
+                    st.markdown("_Aucun problème détecté._")
             if eda.id_columns:
-                names = ", ".join(c.get("name", "?") for c in eda.id_columns)
-                st.markdown(f"- 🆔 Identifiants détectés : **{names}** (exclus des analyses)")
-            st.subheader("Insights")
-            for insight in eda.insights:
-                st.markdown(f"- {insight}")
-            st.subheader("Cible suggérée")
-            st.subheader("Cible suggérée")
-            if result.target_suggestions:
-                for s in result.target_suggestions[:3]:
-                    col_label = s.get("column")
-                    col_type = s.get("problem_type")
-                    col_score = s.get("score")
-                    st.markdown(f"- `{col_label}` → {col_type} (score {col_score})")
-            else:
-                st.markdown("_Aucune suggestion disponible._")
+                with st.expander("🆔 Identifiants détectés", expanded=True):
+                    names = ", ".join(c.get("name", "?") for c in eda.id_columns)
+                    st.markdown(f"**{names}** — exclus des analyses et du pipeline d'entraînement.")
+            with st.expander("💡 Insights", expanded=True):
+                if eda.insights:
+                    for insight in eda.insights:
+                        st.markdown(f"- {insight}")
+                else:
+                    st.markdown("_Le dataset semble propre._")
+            with st.expander("🎯 Cible suggérée", expanded=True):
+                if result.target_suggestions:
+                    for s in result.target_suggestions[:3]:
+                        col_label = s.get("column")
+                        col_type = s.get("problem_type")
+                        col_score = s.get("score")
+                        st.markdown(f"- `{col_label}` → **{col_type}** (score {col_score})")
+                else:
+                    st.markdown("_Aucune suggestion disponible._")
             st.subheader("Figures")
             if eda.figures:
                 figure_cols = st.columns(2)
@@ -316,6 +334,7 @@ if result is not None and df is not None:
             st.download_button("Télécharger le pipeline", data=pipeline_path.read_bytes(), file_name="pipeline.joblib", mime="application/octet-stream")
         else:
             st.warning(f"Pipeline introuvable ({pipeline_path}).")
+
 
 
 
