@@ -103,10 +103,11 @@ with col2:
                     st.markdown("**🎯 Cibles suggérées :**")
                     for s in suggestions[:3]:
                         reasons = "; ".join(s.reasons)
-                        st.markdown(f"- `{s.column}` → {s.problem_type.value} (score {s.score}) — {reasons}")
+                        st.markdown(f"- `{s.column}` → **{s.problem_type.value}** (score {s.score}) — {reasons}")
                     if target is None:
-                        choice = st.radio("Appliquer la cible suggérée", options=[s.column for s in suggestions[:1]], index=0, key="apply_suggestion")
-                        suggested_target = choice
+                        apply = st.checkbox(f"✅ Utiliser `{suggestions[0].column}` comme cible (problème {suggestions[0].problem_type.value})", value=True, key="apply_suggestion")
+                        if apply:
+                            suggested_target = suggestions[0].column
                 if q.get("issues"):
                     st.markdown("**⚠️ Problèmes identifiés :**")
                     for issue in q["issues"]:
