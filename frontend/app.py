@@ -87,6 +87,7 @@ with col2:
         target = None if target == "(aucune)" else target
 
         with st.expander("🔍 Diagnostic intelligent (avant lancement)", expanded=True):
+            suggested_target = None
             try:
                 preview_meta = preview.copy()
                 id_cols = detect_id_columns(preview_meta)
@@ -103,14 +104,17 @@ with col2:
                     for s in suggestions[:3]:
                         reasons = "; ".join(s.reasons)
                         st.markdown(f"- `{s.column}` → {s.problem_type.value} (score {s.score}) — {reasons}")
+                    if target is None:
+                        choice = st.radio("Appliquer la cible suggérée", options=[s.column for s in suggestions[:1]], index=0, key="apply_suggestion")
+                        suggested_target = choice
                 if q.get("issues"):
                     st.markdown("**⚠️ Problèmes identifiés :**")
                     for issue in q["issues"]:
                         st.markdown(f"- {issue}")
             except Exception as exc:
                 st.warning(f"Diagnostic indisponible : {exc}")
-
-        run_button = st.button("🚀 Lancer le pipeline AutoML", type="primary")
+            if suggested_target and target is None:
+                target = suggested_target
     else:
         target = None
         run_button = False
@@ -189,20 +193,27 @@ if result is not None and df is not None:
             for insight in eda.insights:
                 st.markdown(f"- {insight}")
             st.subheader("Cible suggérée")
+            st.subheader("Cible suggérée")
             if result.target_suggestions:
                 for s in result.target_suggestions[:3]:
-                    st.markdown(f"  - `{s.get("column")}` → {s.get("problem_type")} (score {s.get("score")})")
+                    col_label = s.get("column")
+                    col_type = s.get("problem_type")
+                    col_score = s.get("score")
+                    st.markdown(f"- `{col_label}` → {col_type} (score {col_score})")
+            else:
+                st.markdown("_Aucune suggestion disponible._")
             st.subheader("Figures")
-            figure_cols = st.columns(2)
-            for idx, fig in enumerate(eda.figures):
-                with figure_cols[idx % 2]:
-                    full_path = resolve_artifact(fig)
-                    if full_path and full_path.is_file():
-                        st.image(str(full_path), caption=Path(fig).name)
-                    else:
-                        st.warning(f"Figure introuvable : {fig}")
-
-    with tabs[2]:
+            if eda.figures:
+                figure_cols = st.columns(2)
+                for idx, fig in enumerate(eda.figures):
+                    with figure_cols[idx % 2]:
+                        full_path = resolve_artifact(fig)
+                        if full_path and full_path.is_file():
+                            st.image(str(full_path), caption=Path(fig).name)
+                        else:
+                            st.warning(f"Figure introuvable : {fig}")
+            else:
+                st.info("Aucune figure générée.")
         plan = result.preprocessing
         drop = list(plan.drop_columns or [])
         impute = plan.imputation or {}
