@@ -25,6 +25,11 @@ from automl.agents.target_recommender import recommend_target  # noqa: E402
 from automl.core.io import SUPPORTED_EXTENSIONS, find_dataset_file  # noqa: E402
 from automl.pipeline import AutoMLPipeline  # noqa: E402
 
+st.set_page_config(page_title='AutoML Studio', page_icon='🧠', layout='wide')
+settings = get_settings()
+ARTIFACTS_ROOT = settings.artifacts_root.resolve()
+
+
 
 def resolve_artifact(relative_path: Optional[str]) -> Optional[Path]:
     """Resolve an artifact path defensively, ensuring it stays under ARTIFACTS_ROOT."""
@@ -300,5 +305,7 @@ if result is not None and df is not None:
             st.download_button("Télécharger le pipeline", data=pipeline_path.read_bytes(), file_name="pipeline.joblib", mime="application/octet-stream")
         else:
             st.warning(f"Pipeline introuvable ({pipeline_path}).")
+
+
 
 
