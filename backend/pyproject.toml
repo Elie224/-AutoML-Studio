@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "automl-studio"
+version = "0.1.0"
+description = "Plateforme AutoML de bout en bout : import, EDA, preprocessing, entraînement, explicabilité, déploiement."
+requires-python = ">=3.10"
+readme = "../README.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["automl*"]

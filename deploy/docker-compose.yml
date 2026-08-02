@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ../backend
+    container_name: automl-api
+    ports:
+      - "8000:8000"
+    environment:
+      - AUTOML_HOST=0.0.0.0
+      - AUTOML_PORT=8000
+    volumes:
+      - ../artifacts:/app/artifacts
+    restart: unless-stopped
+
+  frontend:
+    image: python:3.11-slim
+    container_name: automl-frontend
+    working_dir: /app
+    ports:
+      - "8501:8501"
+    command: >
+      bash -c "pip install -r /app/requirements.txt && streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0"
+    volumes:
+      - ../:/app
+    depends_on:
+      - api
+    restart: unless-stopped
