@@ -297,29 +297,50 @@ class EDAAgent:
     def _quality_score(self, df, id_columns, eda):
         n_rows = max(len(df), 1)
         score = 100
+        breakdown = []  # list of (points_removed, label, evidence) sorted by impact
         issues = []
         for col, info in eda.missing_values["missing_per_column"].items():
             ratio = info["ratio"]
             if ratio > 0.50:
-                score -= 12
-                issues.append(f"{col} : {ratio*100:.1f}% de valeurs manquantes.")
+                delta = 12
+                tier = ">50% de NaN"
             elif ratio > 0.20:
-                score -= 5
+                delta = 5
+                tier = ">20% de NaN"
             elif ratio > 0.05:
-                score -= 2
+                delta = 2
+                tier = ">5% de NaN"
+            else:
+                continue
+            score -= delta
+            breakdown.append((delta, col, f"{ratio*100:.1f}%"))
+            issues.append(f"{col} : {ratio*100:.1f}% de valeurs manquantes ({tier}).")
         dup_ratio = eda.duplicates / n_rows if n_rows else 0
         if dup_ratio > 0.10:
             score -= 10
-            issues.append(f"{eda.duplicates} doublons ({dup_ratio*100:.1f}%).")
+            breakdown.append((10, "doublons", f"{eda.duplicates} ({dup_ratio*100:.1f}%)"))
+            issues.append(f"{eda.duplicates} doublons exacts ({dup_ratio*100:.1f}%).")
         elif dup_ratio > 0.01:
             score -= 3
+            breakdown.append((3, "doublons", f"{eda.duplicates} ({dup_ratio*100:.1f}%)"))
         if id_columns:
-            score -= min(5, len(id_columns) * 2)
-            issues.append(f"{len(id_columns)} colonne(s) identifiant détectée(s).")
-        score -= min(15, len(eda.outliers) * 3 if eda.outliers else 0)
+            delta = min(8, len(id_columns) * 2)
+            score -= delta
+            names = ", ".join(c.name for c in id_columns)
+            breakdown.append((delta, "identifiants", names))
+            issues.append(f"{len(id_columns)} colonne(s) identifiant détectée(s) : {names}.")
+        outliers_count = len(eda.outliers) if eda.outliers else 0
+        if outliers_count:
+            delta = min(15, outliers_count * 3)
+            score -= delta
+            top_out = sorted(eda.outliers.items(), key=lambda x: x[1]["count"], reverse=True)[:3]
+            names = ", ".join(c for c, _ in top_out)
+            breakdown.append((delta, "outliers", names))
+            issues.append(f"{outliers_count} colonne(s) avec outliers (IQR) : {names}.")
         if eda.class_balance and eda.class_balance.get("is_imbalanced"):
             score -= 5
-            issues.append("Cible déséquilibrée.")
+            breakdown.append((5, "déséquilibre cible", "distribution biaisée"))
+            issues.append("Cible déséquilibrée : envisager stratified sampling ou class_weight.")
         score = max(0, min(100, score))
         if score >= 85:
             grade = "excellent"
@@ -329,8 +350,8 @@ class EDAAgent:
             grade = "moyen"
         else:
             grade = "faible"
-        return {"score": score, "grade": grade, "issues": issues}
-
+        breakdown.sort(key=lambda item: item[0], reverse=True)
+        return {"score": score, "grade": grade, "issues": issues, "breakdown": breakdown}
     def _insights(self, result, df, id_columns):
         insights = []
         if id_columns:

@@ -1,9 +1,3 @@
-"""Streamlit demo UI for AutoML Studio.
-
-Run with:
-    streamlit run frontend/app.py
-"""
-from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -202,7 +196,12 @@ if result is not None and df is not None:
                         st.markdown(f"- {issue}")
                 else:
                     st.markdown("_Aucun problème détecté._")
-            if eda.id_columns:
+            breakdown = quality.get("breakdown", []) or []
+            if breakdown:
+                with st.expander("🧮 Décomposition du score", expanded=False):
+                    st.markdown("Le score part de 100 et applique les pénalités ci-dessous (triées par impact décroissant) :")
+                    for delta, label, evidence in breakdown:
+                        st.markdown(f"- **−{delta} pts** : `{label}` — {evidence}")
                 with st.expander("🆔 Identifiants détectés", expanded=True):
                     names = ", ".join(c.get("name", "?") for c in eda.id_columns)
                     st.markdown(f"**{names}** — exclus des analyses et du pipeline d'entraînement.")
